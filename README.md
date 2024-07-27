@@ -17,11 +17,13 @@ cd Capstone-Project
 2. Set Up a Virtual Environment
 Set up a virtual environment to manage dependencies:
 
-On Windows
+On Windows :: 
+
 python -m venv venv
 venv\Scripts\activate
 
-On macOS/Linux
+On macOS/Linux :: 
+
 python3 -m venv venv
 source venv/bin/activate
 
