@@ -1,12 +1,12 @@
-##Prerequisites
+## Prerequisites
 #Python 3.7 or higher: 
 Make sure you have Python installed. You can download it from [Python.org](https://www.python.org/downloads/).
-#Git: 
+# Git: 
 Ensure Git is installed on your system. You can download it from [Git-SCM.com](https://git-scm.com/downloads).
-#Neo4j: 
+# Neo4j: 
 Install Neo4j Desktop from [Neo4j Downloads](https://neo4j.com/docs/desktop-manual/current/installation/download-installation/).
 
-#Installation Steps
+# Installation Steps
 1. Clone the Repository
 Open your terminal or command prompt and clone the repository from GitHub:
 
@@ -56,7 +56,7 @@ Open your web browser and go to http://localhost:8501 to access the Streamlit ap
 
 
 
-#Troubleshooting
+# Troubleshooting
 Common Issues
 Neo4j Connection Error:
 
