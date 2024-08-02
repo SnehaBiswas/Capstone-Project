@@ -17,7 +17,7 @@ import re
 import spacy
 
 # Load spaCy model
-nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_web_md")
 
 # Load environment variables
 load_dotenv()
@@ -27,8 +27,11 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 password = os.getenv("NEO4J_PASSWORD")
 user = os.getenv("NEO4J_USER")
 uri = os.getenv("NEO4J_URI")
-
-
+data_from_db = []
+# if not openai.api_key:
+#     st.error("OpenAI API key not found. Please set the API key in your environment variables.")
+# else:
+#     st.write(f"OpenAI API key loaded: {openai.api_key[:5]}...{openai.api_key[-5:]}")
 
 def create_neo4j_driver(uri, user, password):
     try:
@@ -133,7 +136,6 @@ def query_openai(prompt, context=""):
             ],
             max_tokens=150
         )
-        # Accessing response text
         return response.choices[0].message['content'].strip()
     except openai.OpenAIError as e:
         return f"An error occurred: {str(e)}"
@@ -146,16 +148,20 @@ def query_neo4j(driver, query):
     
 def fetch_data_based_on_prompt(driver, prompt):
     cypher_query = generate_cypher_query(prompt)
+    print(cypher_query)
     if not cypher_query:
+        print("not cypher")
         cypher_query = query_openai(prompt, context="Translate the following English prompt into a Cypher query")
-    
+    global data_from_db
     try:
         with driver.session() as session:
             result = session.run(cypher_query)
-            return result.data()
+            data_from_db = result.data()
+            print(f"Data from Neo4j: {data_from_db}")
+            return data_from_db
     except Exception as e:
         print(f"Failed to execute query: {e}")
-        return {"error": str(e)}
+        return []
     
 # def fetch_graph_data(uri, user, password):
 #     graph = Graph(uri, auth=(user, password))
@@ -184,21 +190,64 @@ def fetch_data_based_on_prompt(driver, prompt):
 
 def generate_cypher_query(prompt):
     doc = nlp(prompt)
-    if "find" in prompt.lower() and "report" in prompt.lower():
-        return "MATCH (r:Report) RETURN r"
-    elif "find" in prompt.lower() and "regulator" in prompt.lower():
-        return "MATCH (r:Regulator) RETURN r"
-    elif "relationship between" in prompt.lower():
-        entities = [ent.text for ent in doc.ents]
-        return f"MATCH (a:Report {{name: '{entities[0]}'}})-[r]->(b:Report {{name: '{entities[1]}'}}) RETURN a, r, b"
-    else:
-        return None
-    
+    entities = [ent.text for ent in doc.ents]
+    # Keywords and their corresponding Cypher queries
+    if "explain" in prompt.lower() or "what is" in prompt.lower():
+        # Extract information about a specific report or regulator
+        if entities:
+            entity_name = entities[0]
+            # Use the entity name directly to search in the ReportName or Regulator
+            return f"MATCH (n:ReportCode {{name: '{entity_name}'}}) RETURN n"
+
+    if "list" in prompt.lower() or "show" in prompt.lower():
+        # List all reports or regulators
+        if "reports" in prompt.lower():
+            return "MATCH (r:ReportName) RETURN r.name AS ReportName"
+        elif "regulators" in prompt.lower():
+            return "MATCH (r:Regulator) RETURN r.name AS Regulator"
+
+    if "relationship between" in prompt.lower():
+        # Retrieve the relationship between two entities
+        if len(entities) >= 2:
+            entity1, entity2 = entities[:2]
+            return f"""
+            MATCH (a {{name: '{entity1}'}})-[r]->(b {{name: '{entity2}'}})
+            RETURN a, r, b
+            """
+
+    # General queries with keywords like "find" and "details of"
+    if "find" in prompt.lower() or "details of" in prompt.lower():
+        if entities:
+            entity_name = entities[0]
+            return f"""
+            MATCH (r:ReportCode {{name: '{entity_name}'}})
+            OPTIONAL MATCH (r)-[:HAS_CODE]->(c:ReportCode)
+            OPTIONAL MATCH (c)-[:HAS_NAME]->(n:ReportName)
+            RETURN r, c, n
+            """
+
+    # Fallback case if no specific rule matched
+    return None
+
+def evaluate_response(response, context, question):
+    evaluation_prompt = f"Context: {context}\n\nQuestion: {question}\n\nResponse: {response}\n\nEvaluate the response based on correctness, coherence, and relevance. Provide a score out of 10 and a brief explanation."
+    try:
+        evaluation = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an evaluator."},
+                {"role": "user", "content": evaluation_prompt}
+            ],
+            max_tokens=150
+        )
+        return evaluation.choices[0].message['content'].strip()
+    except openai.OpenAIError as e:
+        return f"An error occurred during evaluation: {str(e)}"
 
 # Main function for the Streamlit app
 def main():
 
-    global uri, user, password
+    global uri, user, password, data_from_db
     st.title("Streamlit App with Neo4j and OpenAI Integration")
 
     st.sidebar.title("Navigation")
@@ -247,22 +296,40 @@ def main():
 
     elif choice == "Query OpenAI":
         st.header("Query OpenAI")
-        user_input = st.text_area("Enter your question:")
+        context = st.text_area("Provide context for the question (optional):", "")
+        question = st.text_input("Enter your question:")
         if st.button("Get Answer"):
-            if user_input:
+            print(data_from_db)
+            data_from_db = []
+            print(data_from_db)
+            if question:
                 driver = create_neo4j_driver(uri, user, password)
                 if driver is None:
                     st.error("Failed to connect to Neo4j. Check your credentials and try again.")
                     return
 
-                data_from_db = fetch_data_based_on_prompt(driver, user_input)
-                
+                print(data_from_db)
+                data_from_db = fetch_data_based_on_prompt(driver, question)
+                print(f"main : {data_from_db}")
                 formatted_data = ""
+                if data_from_db and isinstance(data_from_db, list):
+                    for record in data_from_db:
+                        print(record)
+                        formatted_data += str(record) + "\n"
+                    print(f"Formatted Data: {formatted_data}")
                 for record in data_from_db:
                     formatted_data += str(record) + "\n"
-                
-                answer = query_openai(formatted_data)
-                st.write(answer)
+                print(formatted_data)
+                if formatted_data:
+                    answer = query_openai(formatted_data)
+                    st.write(answer)
+
+                else:
+                    st.error("No data found in the database matching the query.")
+
+                evaluation = evaluate_response(answer, context, question)
+                print(evaluation)
+                #st.write("Evaluation:", evaluation)
             else:
                 st.error("Please enter a question.")
 
